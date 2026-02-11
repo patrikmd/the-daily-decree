@@ -272,6 +272,63 @@ const generateNewspaperImage = async (visualPrompt: string): Promise<string | un
   return undefined;
 };
 
+/**
+ * Ensures the newspaper data is valid and has all required fields to prevent UI crashes.
+ */
+const sanitizeNewspaperData = (data: any, country: Country): NewspaperData => {
+  const defaultStory = {
+    headline: "Extra! Extra! News Room Silenced!",
+    subhead: "Technical difficulties in the capital",
+    content: "The printing presses are struggling to keep up with the rapid pace of change. Our reporters are currently investigating the latest developments.",
+    author: "Staff Reporter",
+    visualPrompt: "Busy newsroom office 1980s"
+  };
+
+  const defaultStats = {
+    economy: 50,
+    stability: 50,
+    liberty: 50,
+    approval: 50
+  };
+
+  return {
+    issueDate: data?.issueDate || new Date().toLocaleDateString(),
+    issueNumber: data?.issueNumber || 1,
+    newspaperName: data?.newspaperName || "The Daily Decree",
+    country: country,
+    characters: Array.isArray(data?.characters) ? data.characters : [],
+    recommendedActions: Array.isArray(data?.recommendedActions) ? data.recommendedActions : [],
+    mainStory: {
+      headline: data?.mainStory?.headline || defaultStory.headline,
+      subhead: data?.mainStory?.subhead || defaultStory.subhead,
+      content: data?.mainStory?.content || defaultStory.content,
+      author: data?.mainStory?.author || defaultStory.author,
+      visualPrompt: data?.mainStory?.visualPrompt || defaultStory.visualPrompt
+    },
+    editorial: {
+      headline: data?.editorial?.headline || "Opinion: The Road Ahead",
+      content: data?.editorial?.content || "We must remain vigilant in these trying times."
+    },
+    worldNews: Array.isArray(data?.worldNews) ? data.worldNews : [],
+    localNews: Array.isArray(data?.localNews) ? data.localNews : [],
+    businessNews: Array.isArray(data?.businessNews) ? data.businessNews : [],
+    marketData: {
+      indices: Array.isArray(data?.marketData?.indices) ? data.marketData.indices : [],
+      commodities: Array.isArray(data?.marketData?.commodities) ? data.marketData.commodities : [],
+      currencies: Array.isArray(data?.marketData?.currencies) ? data.marketData.currencies : []
+    },
+    stats: {
+      economy: Number(data?.stats?.economy) || defaultStats.economy,
+      stability: Number(data?.stats?.stability) || defaultStats.stability,
+      liberty: Number(data?.stats?.liberty) || defaultStats.liberty,
+      approval: Number(data?.stats?.approval) || defaultStats.approval
+    },
+    gameOver: !!data?.gameOver,
+    gameOverReason: data?.gameOverReason || "",
+    diplomacy: data?.diplomacy || {}
+  };
+};
+
 const getCountryContext = (country: Country) => {
   switch (country) {
     case 'USA': return "United States of America. Leader Title: President. Currency: USD. Capital: Washington D.C.";
@@ -300,7 +357,8 @@ export const initializeGame = async (
     const newspaperText = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA);
     if (!newspaperText) throw new Error("No response text from AI.");
 
-    const data = JSON.parse(newspaperText) as NewspaperData;
+    const rawData = JSON.parse(newspaperText);
+    const data = sanitizeNewspaperData(rawData, country);
     data.country = country;
     data.diplomacy = {};
 
@@ -317,7 +375,7 @@ export const initializeGame = async (
       }
     } catch (e) { console.warn("Diplomacy failed", e); }
 
-    if (data.mainStory.visualPrompt) {
+    if (data.mainStory?.visualPrompt) {
       if (onProgress) onProgress("Developing Photos...", 90);
       data.imageUrl = await generateNewspaperImage(data.mainStory.visualPrompt);
     }
@@ -347,11 +405,12 @@ export const processTurn = async (
   try {
     const systemInstruction = "Maintain character continuity. global variety. NO PLACEHOLDERS.";
     const text = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA);
-    const data = JSON.parse(text) as NewspaperData;
+    const rawData = JSON.parse(text);
+    const data = sanitizeNewspaperData(rawData, country);
     data.country = country;
     data.diplomacy = {};
 
-    if (data.mainStory.visualPrompt) {
+    if (data.mainStory?.visualPrompt) {
       data.imageUrl = await generateNewspaperImage(data.mainStory.visualPrompt);
     }
     return data;
