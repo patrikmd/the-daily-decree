@@ -132,8 +132,13 @@ export const GameSession: React.FC<Props> = ({
             </div>
           </div>
 
-          <div className="hidden md:block ml-4 text-[10px] font-mono text-stone-500 uppercase shrink-0">
-            {country} Simulation | Turn {turnCount}
+          <div className="hidden md:flex items-center gap-3 ml-4 shrink-0">
+            <span className="text-[10px] font-mono text-stone-500 uppercase">
+              {country} Simulation | Turn {turnCount}
+            </span>
+            <span className="text-[9px] font-mono text-emerald-400/80 bg-emerald-900/30 border border-emerald-800/40 px-2 py-0.5 rounded-sm uppercase tracking-wider">
+              ⚡ {data.aiModel || "Gemini 2.0"}
+            </span>
           </div>
         </div>
 

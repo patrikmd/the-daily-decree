@@ -128,15 +128,6 @@ export const Newspaper: React.FC<Props> = ({ data }) => {
             </div>
 
             <ArticleContent content={data.mainStory.content} dropCap className="md:columns-2 gap-6" />
-
-            <div className="mt-4 pt-2 border-t border-stone-300 flex justify-between items-center opacity-70">
-              <span className="text-[9px] font-sans font-bold uppercase tracking-tight text-stone-500">
-                AI Attribution: {data.aiModel || "Gemini 2.0 Core"}
-              </span>
-              <span className="text-[9px] font-sans italic text-stone-400">
-                Procedural Mechanics Engine v1.2
-              </span>
-            </div>
           </div>
 
           {/* Sidebar: Editorial (4 cols) */}
@@ -151,14 +142,11 @@ export const Newspaper: React.FC<Props> = ({ data }) => {
             {/* Filler / Teaser */}
             <div className="mt-auto border-t-2 border-double border-black pt-2">
               <p className="font-sans text-xs font-bold uppercase text-center mb-1">In This Issue</p>
-              <ul className="text-sm font-serif list-disc pl-5 mb-4">
+              <ul className="text-sm font-serif list-disc pl-5">
                 <li>World News ................... Pg 2</li>
                 <li>Local Events ................... Pg 2</li>
                 <li>Market Watch ................ Pg 3</li>
               </ul>
-              <div className="border-t border-stone-300 pt-2 text-[9px] font-sans text-stone-500 uppercase text-center font-bold tracking-tighter">
-                Powered by {data.aiModel || "Direct Link"}
-              </div>
             </div>
           </div>
         </div>
