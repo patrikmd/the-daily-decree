@@ -230,7 +230,7 @@ const App: React.FC = () => {
           />
         </div>
 
-        <div className="font-mono text-stone-400 text-lg">{loadingStatus}</div>
+        <div className="font-mono text-stone-400 text-lg">{loadingStatus} (v1.1)</div>
         <div className="font-mono text-xs mt-2 text-stone-600">{loadingProgress}%</div>
       </div>
     );
