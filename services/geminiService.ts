@@ -15,7 +15,7 @@ const BACKUP_MODELS = [
   "google/gemma-3-27b-it:free",
   "mistralai/mistral-small-3.1-24b-instruct:free",
   "meta-llama/llama-3.3-70b-instruct:free",
-  "deepseek/deepseek-r1-0528:free",
+  "deepseek/deepseek-chat-v3-0324:free",
   "qwen/qwen-2.5-72b-instruct:free",
   "openrouter/auto:free"
 ];
@@ -35,16 +35,34 @@ const getAIClient = () => {
 };
 
 /**
- * Strips markdown code blocks and any leading/trailing whitespace from AI responses.
+ * Strips markdown code blocks, <think> reasoning blocks, and any extra
+ * text from AI responses so that only the JSON payload remains.
  */
 const cleanJSON = (text: string): string => {
   if (!text) return "";
-  // Try to extract content between ```json and ``` or just ``` and ```
-  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  if (match && match[1]) {
-    return match[1].trim();
+  let cleaned = text;
+
+  // 1. Strip <think>...</think> blocks (handles closed tags)
+  cleaned = cleaned.replace(/<think>[\s\S]*?<\/think>/gi, "");
+
+  // 2. Strip unclosed <think> blocks (model hit token limit before closing)
+  cleaned = cleaned.replace(/<think>[\s\S]*/gi, "");
+
+  cleaned = cleaned.trim();
+
+  // 3. Try to extract content from markdown code fences
+  const fenceMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (fenceMatch && fenceMatch[1]) {
+    return fenceMatch[1].trim();
   }
-  return text.trim();
+
+  // 4. Last resort: find the first { or [ and extract from there
+  const jsonStart = cleaned.search(/[{\[]/);
+  if (jsonStart > 0) {
+    cleaned = cleaned.substring(jsonStart);
+  }
+
+  return cleaned.trim();
 };
 
 const getResponseText = (response: any): string => {
