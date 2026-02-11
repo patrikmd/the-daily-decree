@@ -9,11 +9,13 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const TEXT_MODEL_NAME = "gemini-2.0-flash";
 const IMAGE_MODEL_NAME = "gemini-2.0-flash";
 
-// Try these models in order if Gemini fails
+// Try these models in order if Gemini fails (all :free to avoid billing errors)
 const BACKUP_MODELS = [
   "google/gemini-2.0-flash-exp:free",
-  "z-ai/glm-5",
+  "google/gemma-3-27b-it:free",
+  "mistralai/mistral-small-3.1-24b-instruct:free",
   "meta-llama/llama-3.3-70b-instruct:free",
+  "deepseek/deepseek-r1-0528:free",
   "qwen/qwen-2.5-72b-instruct:free",
   "openrouter/auto:free"
 ];
