@@ -26,41 +26,56 @@ const BACKUP_MODELS = [
 /**
  * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
  */
+/**
+ * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
+ */
 const callAI = async (
   prompt: string,
   systemInstruction: string,
   schema: any,
-  useGemini: boolean = true
+  onProgress?: (modelName: string) => void
 ): Promise<string> => {
-  if (useGemini) {
-    try {
-      checkRateLimit();
-      const ai = getAIClient();
-      const response = await ai.models.generateContent({
-        model: TEXT_MODEL_NAME,
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: schema,
-          systemInstruction: systemInstruction
-        }
-      });
-      const text = getResponseText(response);
-      if (text) return text;
-    } catch (error: any) {
-      console.warn("Primary AI (Gemini) failed, checking for fallback...", error.message);
-      // Fall through if it's a quota or 429 error
-      if (!openRouterKey) throw error;
-    }
+  // 1. Try Gemini
+  try {
+    checkRateLimit();
+    if (onProgress) onProgress("Gemini 2.0");
+    const ai = getAIClient();
+
+    const geminiTask = ai.models.generateContent({
+      model: TEXT_MODEL_NAME,
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: schema,
+        systemInstruction: systemInstruction
+      }
+    });
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error("Gemini Request Timeout")), 35000)
+    );
+
+    const response = await Promise.race([geminiTask, timeoutPromise]) as any;
+    const text = getResponseText(response);
+    if (text) return text;
+  } catch (error: any) {
+    console.warn("Primary AI (Gemini) failed, checking for fallback...", error.message);
+    if (!openRouterKey) throw error;
   }
 
-  // Fallback to OpenRouter - Try multiple models in the chain
+  // 2. Fallback to OpenRouter - Try multiple models in the chain
   if (!openRouterKey) throw new Error("Both Gemini and OpenRouter keys are missing or exhausted.");
 
   let lastError = null;
   for (const model of BACKUP_MODELS) {
     try {
+      const friendlyName = model.split('/')[1]?.split(':')[0] || model;
+      if (onProgress) onProgress(`Backup (${friendlyName})`);
       console.log(`Using OpenRouter Backup (Model: ${model})...`);
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 35000);
+
       const body = {
         model: model,
         messages: [
@@ -72,6 +87,7 @@ const callAI = async (
 
       const response = await fetch(OPENROUTER_URL, {
         method: "POST",
+        signal: controller.signal,
         headers: {
           "Authorization": `Bearer ${openRouterKey}`,
           "Content-Type": "application/json",
@@ -81,21 +97,23 @@ const callAI = async (
         body: JSON.stringify(body)
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error?.message || response.statusText);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
       }
 
       const result = await response.json();
-      return result.choices[0].message.content;
+      return result.choices?.[0]?.message?.content || "";
     } catch (e: any) {
-      console.warn(`OpenRouter model ${model} failed:`, e.message);
+      console.warn(`OpenRouter model ${model} failed:`, e.name === 'AbortError' ? "Timeout" : e.message);
       lastError = e;
-      continue; // Try next model in the chain
+      continue;
     }
   }
 
-  throw new Error(`AI Service Unavailable: ${lastError?.message || "All fallback models failed."}`);
+  throw new Error(`AI Service Unavailable: ${lastError?.message || "All models failed"}`);
 };
 
 // Rate limiting state
@@ -354,7 +372,9 @@ export const initializeGame = async (
     const promptNewspaper = `Initialize a political simulation for: ${context}. LEADER NAME: ${leaderName || "Generate a fitting name"}. Generate staff, 4+ world stories, and 3 recommended actions.`;
 
     const systemInstruction = "You are the Editor-in-Chief. Write detailed, immersive, journalistic content. NO PLACEHOLDERS.";
-    const newspaperText = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA);
+    const newspaperText = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
+      if (onProgress) onProgress(`Drafting Front Page (${model})...`, 10);
+    });
     if (!newspaperText) throw new Error("No response text from AI.");
 
     const rawData = JSON.parse(newspaperText);
@@ -368,7 +388,9 @@ export const initializeGame = async (
       checkRateLimit();
       const promptDiplomacy = `Generate a diplomatic report for: ${COUNTRY_LIST.join(", ")}.`;
       const systemInstruction = "You are the Director of Intelligence.";
-      const diploText = await callAI(promptDiplomacy, systemInstruction, DIPLOMACY_SCHEMA);
+      const diploText = await callAI(promptDiplomacy, systemInstruction, DIPLOMACY_SCHEMA, (model) => {
+        if (onProgress) onProgress(`Intelligence Analysis (${model})...`, 60);
+      });
       if (diploText) {
         const diploData = JSON.parse(diploText) as ForeignCountry[];
         diploData.forEach(c => data.diplomacy[c.name] = c);
@@ -404,7 +426,9 @@ export const processTurn = async (
 
   try {
     const systemInstruction = "Maintain character continuity. global variety. NO PLACEHOLDERS.";
-    const text = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA);
+    const text = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
+      console.log(`Processing Turn (${model})...`);
+    });
     const rawData = JSON.parse(text);
     const data = sanitizeNewspaperData(rawData, country);
     data.country = country;
