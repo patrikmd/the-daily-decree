@@ -20,15 +20,10 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const BACKUP_MODELS = [
   "google/gemini-2.0-flash-exp:free",
   "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen-2.5-72b-instruct:free",
   "openrouter/auto:free"
 ];
 
-/**
- * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
- */
-/**
- * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
- */
 /**
  * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
  */
@@ -76,6 +71,10 @@ const callAI = async (
     throw new Error("Missing OpenRouter API Key. Please add OPENROUTER_API_KEY to Vercel/Environment.");
   }
 
+  // Create a strict instruction with the schema for models that don't support responseSchema natively
+  const schemaStr = JSON.stringify(schema, null, 2);
+  const strictSystemInstruction = `${systemInstruction}\n\nYou MUST respond in valid JSON matching this structure exactly:\n${schemaStr}\n\nCRITICAL: Respond ONLY with the JSON object. No pre-amble, no explanations. Ensure all required fields are present.`;
+
   let lastError = null;
   for (const model of BACKUP_MODELS) {
     try {
@@ -84,12 +83,12 @@ const callAI = async (
       console.log(`Using OpenRouter Backup (Model: ${model})...`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 35000);
+      const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s for larger models
 
       const body = {
         model: model,
         messages: [
-          { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format. Follow the requested schema exactly." },
+          { role: "system", content: strictSystemInstruction },
           { role: "user", content: prompt }
         ],
         response_format: { type: "json_object" }
