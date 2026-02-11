@@ -14,6 +14,74 @@ const getAIClient = () => {
 const TEXT_MODEL_NAME = "gemini-2.0-flash";
 const IMAGE_MODEL_NAME = "gemini-2.0-flash";
 
+const openRouterKey = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const BACKUP_MODEL = "google/gemini-2.0-flash-exp:free"; // High-quality free model
+
+/**
+ * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
+ */
+const callAI = async (
+  prompt: string,
+  systemInstruction: string,
+  schema: any,
+  useGemini: boolean = true
+): Promise<string> => {
+  if (useGemini) {
+    try {
+      checkRateLimit();
+      const ai = getAIClient();
+      const response = await ai.models.generateContent({
+        model: TEXT_MODEL_NAME,
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: schema,
+          systemInstruction: systemInstruction
+        }
+      });
+      const text = getResponseText(response);
+      if (text) return text;
+    } catch (error: any) {
+      console.warn("Primary AI (Gemini) failed, checking for fallback...", error.message);
+      // Fall through if it's a quota or 429 error
+      if (!openRouterKey) throw error;
+    }
+  }
+
+  // Fallback to OpenRouter
+  if (!openRouterKey) throw new Error("Both Gemini and OpenRouter keys are missing or exhausted.");
+
+  console.log("Using OpenRouter Backup...");
+  const body = {
+    model: BACKUP_MODEL,
+    messages: [
+      { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format only." },
+      { role: "user", content: prompt }
+    ],
+    response_format: { type: "json_object" }
+  };
+
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${openRouterKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://the-daily-decree.vercel.app", // Optional for OpenRouter rankings
+      "X-Title": "The Daily Decree"
+    },
+    body: JSON.stringify(body)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(`AI Service Unavailable: ${errorData.error?.message || response.statusText}`);
+  }
+
+  const result = await response.json();
+  return result.choices[0].message.content;
+};
+
 // Rate limiting state
 const MAX_REQUESTS_PER_MINUTE = 15;
 const WINDOW_SIZE_MS = 60000;
@@ -212,18 +280,8 @@ export const initializeGame = async (
     if (onProgress) onProgress("Drafting Front Page...", 10);
     const promptNewspaper = `Initialize a political simulation for: ${context}. LEADER NAME: ${leaderName || "Generate a fitting name"}. Generate staff, 4+ world stories, and 3 recommended actions.`;
 
-    const newspaperResponse = await ai.models.generateContent({
-      model: TEXT_MODEL_NAME,
-      contents: promptNewspaper,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: NEWSPAPER_SCHEMA,
-        systemInstruction: "You are the Editor-in-Chief. Write detailed, immersive, journalistic content. NO PLACEHOLDERS."
-      }
-    });
-
-    if (onProgress) onProgress("Printing Newspaper...", 40);
-    const newspaperText = getResponseText(newspaperResponse);
+    const systemInstruction = "You are the Editor-in-Chief. Write detailed, immersive, journalistic content. NO PLACEHOLDERS.";
+    const newspaperText = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA);
     if (!newspaperText) throw new Error("No response text from AI.");
 
     const data = JSON.parse(newspaperText) as NewspaperData;
@@ -235,16 +293,8 @@ export const initializeGame = async (
       if (onProgress) onProgress("Gathering Intelligence...", 60);
       checkRateLimit();
       const promptDiplomacy = `Generate a diplomatic report for: ${COUNTRY_LIST.join(", ")}.`;
-      const diplomacyResponse = await ai.models.generateContent({
-        model: TEXT_MODEL_NAME,
-        contents: promptDiplomacy,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: DIPLOMACY_SCHEMA,
-          systemInstruction: "You are the Director of Intelligence."
-        }
-      });
-      const diploText = getResponseText(diplomacyResponse);
+      const systemInstruction = "You are the Director of Intelligence.";
+      const diploText = await callAI(promptDiplomacy, systemInstruction, DIPLOMACY_SCHEMA);
       if (diploText) {
         const diploData = JSON.parse(diploText) as ForeignCountry[];
         diploData.forEach(c => data.diplomacy[c.name] = c);
@@ -279,17 +329,8 @@ export const processTurn = async (
   const prompt = `Country: ${context}. CHARACTERS: ${characterList}. PLAYER ACTION: "${action}". 4+ world news, 3 NEW actions.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL_NAME,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: NEWSPAPER_SCHEMA,
-        systemInstruction: "Maintain character continuity. global variety. NO PLACEHOLDERS."
-      }
-    });
-
-    const text = getResponseText(response);
+    const systemInstruction = "Maintain character continuity. global variety. NO PLACEHOLDERS.";
+    const text = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA);
     const data = JSON.parse(text) as NewspaperData;
     data.country = country;
     data.diplomacy = {};
@@ -314,16 +355,9 @@ export const getAdvisorOpinion = async (
   const prompt = `Question: "${question}". Cabinet: ${data.characters.map(c => c.name).join(", ")}. Provide strategic advice.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL_NAME,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: advisorResponseSchema,
-        systemInstruction: "Provide strategic in-character advice."
-      }
-    });
-    return JSON.parse(getResponseText(response)) as AdvisorOpinion[];
+    const systemInstruction = "Provide strategic in-character advice.";
+    const text = await callAI(prompt, systemInstruction, advisorResponseSchema);
+    return JSON.parse(text) as AdvisorOpinion[];
   } catch (error) {
     console.error("Advisor failed", error);
     return [{ advisorName: "Chief of Staff", role: "Advisor", advice: "Communication breakdown, sir." }];
@@ -339,16 +373,9 @@ export const identifyCountryDetails = async (
   const prompt = `Context: ${data.mainStory.content}. Details for: ${targetCountry}.`;
 
   try {
-    const response = await ai.models.generateContent({
-      model: TEXT_MODEL_NAME,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: foreignCountrySchema,
-        systemInstruction: "Consistency is key."
-      }
-    });
-    return JSON.parse(getResponseText(response)) as ForeignCountry;
+    const systemInstruction = "Consistency is key.";
+    const text = await callAI(prompt, systemInstruction, foreignCountrySchema);
+    return JSON.parse(text) as ForeignCountry;
   } catch (error) {
     throw error;
   }
