@@ -29,6 +29,9 @@ const BACKUP_MODELS = [
 /**
  * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
  */
+/**
+ * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
+ */
 const callAI = async (
   prompt: string,
   systemInstruction: string,
@@ -57,14 +60,21 @@ const callAI = async (
 
     const response = await Promise.race([geminiTask, timeoutPromise]) as any;
     const text = getResponseText(response);
-    if (text) return text;
+
+    // VALIDATION: Ensure Gemini actually gave us some JSON content
+    if (text && text.includes("headline")) {
+      return text;
+    }
+    console.warn("Gemini returned empty or invalid content, trying OpenRouter...");
   } catch (error: any) {
     console.warn("Primary AI (Gemini) failed, checking for fallback...", error.message);
     if (!openRouterKey) throw error;
   }
 
   // 2. Fallback to OpenRouter - Try multiple models in the chain
-  if (!openRouterKey) throw new Error("Both Gemini and OpenRouter keys are missing or exhausted.");
+  if (!openRouterKey || openRouterKey === "undefined") {
+    throw new Error("Missing OpenRouter API Key. Please add OPENROUTER_API_KEY to Vercel/Environment.");
+  }
 
   let lastError = null;
   for (const model of BACKUP_MODELS) {
@@ -79,7 +89,7 @@ const callAI = async (
       const body = {
         model: model,
         messages: [
-          { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format only." },
+          { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format. Follow the requested schema exactly." },
           { role: "user", content: prompt }
         ],
         response_format: { type: "json_object" }
@@ -99,13 +109,22 @@ const callAI = async (
 
       clearTimeout(timeoutId);
 
+      const result = await response.json().catch(() => ({}));
+
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error?.message || `HTTP ${response.status}`);
+        throw new Error(result.error?.message || `HTTP ${response.status}`);
       }
 
-      const result = await response.json();
-      return result.choices?.[0]?.message?.content || "";
+      const content = result.choices?.[0]?.message?.content;
+
+      // VALIDATION: Ensure the backup model actually gave us a headline
+      if (content && content.includes("headline")) {
+        return content;
+      }
+
+      console.warn(`Model ${model} returned empty/invalid JSON, trying next...`);
+      throw new Error("Invalid/Empty JSON content from model");
+
     } catch (e: any) {
       console.warn(`OpenRouter model ${model} failed:`, e.name === 'AbortError' ? "Timeout" : e.message);
       lastError = e;
