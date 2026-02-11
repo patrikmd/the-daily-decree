@@ -16,7 +16,12 @@ const IMAGE_MODEL_NAME = "gemini-2.0-flash";
 
 const openRouterKey = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const BACKUP_MODEL = "google/gemini-2.0-flash-exp:free"; // High-quality free model
+// Try these models in order if Gemini fails
+const BACKUP_MODELS = [
+  "google/gemini-2.0-flash-exp:free",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "openrouter/auto:free"
+];
 
 /**
  * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
@@ -49,37 +54,48 @@ const callAI = async (
     }
   }
 
-  // Fallback to OpenRouter
+  // Fallback to OpenRouter - Try multiple models in the chain
   if (!openRouterKey) throw new Error("Both Gemini and OpenRouter keys are missing or exhausted.");
 
-  console.log("Using OpenRouter Backup...");
-  const body = {
-    model: BACKUP_MODEL,
-    messages: [
-      { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format only." },
-      { role: "user", content: prompt }
-    ],
-    response_format: { type: "json_object" }
-  };
+  let lastError = null;
+  for (const model of BACKUP_MODELS) {
+    try {
+      console.log(`Using OpenRouter Backup (Model: ${model})...`);
+      const body = {
+        model: model,
+        messages: [
+          { role: "system", content: systemInstruction + "\n\nCRITICAL: You MUST respond in valid JSON format only." },
+          { role: "user", content: prompt }
+        ],
+        response_format: { type: "json_object" }
+      };
 
-  const response = await fetch(OPENROUTER_URL, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${openRouterKey}`,
-      "Content-Type": "application/json",
-      "HTTP-Referer": "https://the-daily-decree.vercel.app", // Optional for OpenRouter rankings
-      "X-Title": "The Daily Decree"
-    },
-    body: JSON.stringify(body)
-  });
+      const response = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${openRouterKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://the-daily-decree.vercel.app",
+          "X-Title": "The Daily Decree"
+        },
+        body: JSON.stringify(body)
+      });
 
-  if (!response.ok) {
-    const errorData = await response.json();
-    throw new Error(`AI Service Unavailable: ${errorData.error?.message || response.statusText}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error?.message || response.statusText);
+      }
+
+      const result = await response.json();
+      return result.choices[0].message.content;
+    } catch (e: any) {
+      console.warn(`OpenRouter model ${model} failed:`, e.message);
+      lastError = e;
+      continue; // Try next model in the chain
+    }
   }
 
-  const result = await response.json();
-  return result.choices[0].message.content;
+  throw new Error(`AI Service Unavailable: ${lastError?.message || "All fallback models failed."}`);
 };
 
 // Rate limiting state
