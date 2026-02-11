@@ -10,8 +10,8 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-const TEXT_MODEL_NAME = "gemini-3-flash-preview";
-const IMAGE_MODEL_NAME = "gemini-2.5-flash-image";
+const TEXT_MODEL_NAME = "gemini-1.5-flash";
+const IMAGE_MODEL_NAME = "gemini-1.5-flash-8b"; // More cost-effective for simple visual prompts
 
 // Reusable story schema
 const storySchema = {
