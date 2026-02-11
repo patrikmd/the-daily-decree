@@ -19,23 +19,37 @@ console.log("Found API Key:", apiKey.substring(0, 5) + "...");
 const main = async () => {
     try {
         const client = new GoogleGenAI({ apiKey });
-        const response = await client.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: "Hello, are you working?"
-        });
-        console.log("Full Response Object:", JSON.stringify(response, null, 2));
-        if (typeof response.text === 'function') {
-            console.log("response.text() result:", response.text());
+        console.log("Listing available models...");
+        const response = await client.models.list();
+        // SDK returns an object with a models property which is an array
+        if (response.models) {
+            response.models.slice(0, 10).forEach(m => console.log(`- ${m.name}`));
         } else {
-            console.log("response.text property:", response.text);
+            console.log("No models property in list response.");
         }
-    } catch (error) {
-        console.error("ERROR: API Test Failed.");
-        console.error(error);
-        if (error.message) console.error("Message:", error.message);
-        // Log full error object keys if possible
-        console.log(JSON.stringify(error, null, 2));
+    } catch (e) { console.log("List failed:", e.message); }
+
+    const modelsToTest = ["gemini-1.5-flash", "gemini-2.0-flash", "models/gemini-1.5-flash", "models/gemini-2.0-flash"];
+    for (const modelId of modelsToTest) {
+        console.log(`\n--- Testing Model: ${modelId} ---`);
+        try {
+            const client = new GoogleGenAI({ apiKey });
+            const response = await client.models.generateContent({
+                model: modelId,
+                contents: "Hello"
+            });
+            console.log(`SUCCESS [${modelId}]:`, getResponseText(response));
+            return; // Exit if we find one that works
+        } catch (error) {
+            console.error(`FAILED [${modelId}]:`, error.message);
+        }
     }
+};
+
+const getResponseText = (response) => {
+    if (typeof response.text === 'function') return response.text();
+    if (response.candidates?.[0]?.content?.parts?.[0]?.text) return response.candidates[0].content.parts[0].text;
+    return "No text produced";
 };
 
 main();
