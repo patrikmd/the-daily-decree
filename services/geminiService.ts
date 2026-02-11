@@ -10,8 +10,8 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-const TEXT_MODEL_NAME = "gemini-1.5-flash";
-const IMAGE_MODEL_NAME = "gemini-2.0-flash-exp"; // Highly capable and better quotas than gemini-3-flash currently
+const TEXT_MODEL_NAME = "gemini-2.0-flash";
+const IMAGE_MODEL_NAME = "gemini-2.0-flash"; // Using 2.0 Flash for both (Image generation requires specific prompts/configs if supported, or will fallback gracefully)
 
 // Reusable story schema
 const storySchema = {
