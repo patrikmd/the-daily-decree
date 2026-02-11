@@ -11,7 +11,7 @@ const getAIClient = () => {
 };
 
 const TEXT_MODEL_NAME = "gemini-1.5-flash";
-const IMAGE_MODEL_NAME = "gemini-1.5-flash-8b"; // More cost-effective for simple visual prompts
+const IMAGE_MODEL_NAME = "gemini-2.0-flash-exp"; // Highly capable and better quotas than gemini-3-flash currently
 
 // Reusable story schema
 const storySchema = {
