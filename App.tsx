@@ -85,10 +85,6 @@ const App: React.FC = () => {
       }
       const file: SaveFile = JSON.parse(raw);
 
-      // Sanitization for legacy saves
-      if (!file.data.diplomacy) {
-        file.data.diplomacy = {};
-      }
 
       setActiveSession({
         id: file.metadata.id,
@@ -199,7 +195,6 @@ const App: React.FC = () => {
   const handleImportGame = (file: SaveFile) => {
     try {
       const saveId = file.metadata.id;
-      if (!file.data.diplomacy) file.data.diplomacy = {};
 
       localStorage.setItem(SAVE_PREFIX + saveId, JSON.stringify(file));
 

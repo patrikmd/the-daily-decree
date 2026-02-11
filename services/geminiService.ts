@@ -1,6 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { NewspaperData, TurnHistory, GameStats, Country, Character, RecommendedAction, AdvisorOpinion, ForeignCountry } from "../types";
-import { COUNTRY_LIST } from "../constants";
+import { NewspaperData, TurnHistory, GameStats, Country, Character, RecommendedAction, AdvisorOpinion } from "../types";
 
 const apiKey = process.env.API_KEY;
 
@@ -212,18 +211,6 @@ const advisorResponseSchema = {
   }
 };
 
-const foreignCountrySchema = {
-  type: Type.OBJECT,
-  properties: {
-    name: { type: Type.STRING },
-    leaderName: { type: Type.STRING },
-    governmentType: { type: Type.STRING },
-    stance: { type: Type.STRING, enum: ['Ally', 'Friendly', 'Neutral', 'Strained', 'Hostile', 'War'] },
-    description: { type: Type.STRING, description: "Brief intelligence summary." }
-  },
-  required: ["name", "leaderName", "governmentType", "stance", "description"]
-};
-
 const NEWSPAPER_SCHEMA = {
   type: Type.OBJECT,
   properties: {
@@ -271,11 +258,6 @@ const NEWSPAPER_SCHEMA = {
     gameOverReason: { type: Type.STRING }
   },
   required: ["issueDate", "mainStory", "editorial", "worldNews", "localNews", "businessNews", "marketData", "stats", "gameOver", "characters", "recommendedActions"]
-};
-
-const DIPLOMACY_SCHEMA = {
-  type: Type.ARRAY,
-  items: foreignCountrySchema
 };
 
 // --- Helpers ---
@@ -360,8 +342,7 @@ const sanitizeNewspaperData = (data: any, country: Country): NewspaperData => {
       approval: Number(data?.stats?.approval) || defaultStats.approval
     },
     gameOver: !!data?.gameOver,
-    gameOverReason: data?.gameOverReason || "",
-    diplomacy: data?.diplomacy || {}
+    gameOverReason: data?.gameOverReason || ""
   };
 };
 
@@ -398,22 +379,6 @@ export const initializeGame = async (
     const rawData = JSON.parse(newspaperText);
     const data = sanitizeNewspaperData(rawData, country);
     data.country = country;
-    data.diplomacy = {};
-
-    // Parallel Diplomacy (Optional)
-    try {
-      if (onProgress) onProgress("Gathering Intelligence...", 60);
-      checkRateLimit();
-      const promptDiplomacy = `Generate a diplomatic report for: ${COUNTRY_LIST.join(", ")}.`;
-      const systemInstruction = "You are the Director of Intelligence.";
-      const diploText = await callAI(promptDiplomacy, systemInstruction, DIPLOMACY_SCHEMA, (model) => {
-        if (onProgress) onProgress(`Intelligence Analysis (${model})...`, 60);
-      });
-      if (diploText) {
-        const diploData = JSON.parse(diploText) as ForeignCountry[];
-        diploData.forEach(c => data.diplomacy[c.name] = c);
-      }
-    } catch (e) { console.warn("Diplomacy failed", e); }
 
     if (data.mainStory?.visualPrompt) {
       if (onProgress) onProgress("Developing Photos...", 90);
@@ -450,7 +415,6 @@ export const processTurn = async (
     const rawData = JSON.parse(text);
     const data = sanitizeNewspaperData(rawData, country);
     data.country = country;
-    data.diplomacy = {};
 
     if (data.mainStory?.visualPrompt) {
       data.imageUrl = await generateNewspaperImage(data.mainStory.visualPrompt);
@@ -478,22 +442,5 @@ export const getAdvisorOpinion = async (
   } catch (error) {
     console.error("Advisor failed", error);
     return [{ advisorName: "Chief of Staff", role: "Advisor", advice: "Communication breakdown, sir." }];
-  }
-};
-
-export const identifyCountryDetails = async (
-  targetCountry: string,
-  data: NewspaperData
-): Promise<ForeignCountry> => {
-  checkRateLimit();
-  const ai = getAIClient();
-  const prompt = `Context: ${data.mainStory.content}. Details for: ${targetCountry}.`;
-
-  try {
-    const systemInstruction = "Consistency is key.";
-    const text = await callAI(prompt, systemInstruction, foreignCountrySchema);
-    return JSON.parse(text) as ForeignCountry;
-  } catch (error) {
-    throw error;
   }
 };

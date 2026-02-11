@@ -3,9 +3,8 @@ import { Newspaper } from './Newspaper';
 import { ControlPanel } from './ControlPanel';
 import { StatsBar } from './StatBadge';
 import { ArchivesModal } from './ArchivesModal';
-import { DiplomacySidebar } from './DiplomacySidebar';
-import { processTurn, getAdvisorOpinion, identifyCountryDetails } from '../services/geminiService';
-import { GameState, NewspaperData, TurnHistory, Country, AdvisorOpinion, ForeignCountry } from '../types';
+import { processTurn, getAdvisorOpinion } from '../services/geminiService';
+import { GameState, NewspaperData, TurnHistory, Country, AdvisorOpinion } from '../types';
 
 interface Props {
   sessionId: string;
@@ -38,14 +37,6 @@ export const GameSession: React.FC<Props> = ({
   // --- UI State ---
   // These reset automatically whenever GameSession mounts (new game or load game)
   const [isArchivesOpen, setIsArchivesOpen] = useState(false);
-  const [isDiplomacyOpen, setIsDiplomacyOpen] = useState(false);
-  const [isConsulting, setIsConsulting] = useState(false);
-  const [advisorOpinions, setAdvisorOpinions] = useState<AdvisorOpinion[]>([]);
-
-  // Diplomacy UI Specifics
-  const [diplomacyLoading, setDiplomacyLoading] = useState(false);
-  const [selectedDiplomacyCountry, setSelectedDiplomacyCountry] = useState<ForeignCountry | undefined>(undefined);
-  const [prefilledAction, setPrefilledAction] = useState<string>('');
 
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -68,8 +59,6 @@ export const GameSession: React.FC<Props> = ({
 
       const result = await processTurn(action, history, currentStats, turnCount, country, currentCharacters);
 
-      // Merge diplomacy data to persist known intel across turns
-      result.diplomacy = { ...data.diplomacy, ...result.diplomacy };
 
       const newHistoryItem: TurnHistory = {
         turnNumber: turnCount + 1,
@@ -106,39 +95,9 @@ export const GameSession: React.FC<Props> = ({
     }
   };
 
-  const handleDiplomacySelectCountry = async (countryName: string) => {
-    if (!countryName) {
-      setSelectedDiplomacyCountry(undefined);
-      return;
-    }
-
-    // Check cache in current data
-    if (data.diplomacy && data.diplomacy[countryName]) {
-      setSelectedDiplomacyCountry(data.diplomacy[countryName]);
-      return;
-    }
-
-    setDiplomacyLoading(true);
-    try {
-      const info = await identifyCountryDetails(countryName, data);
-
-      // Update data with new intel without triggering a re-render of the whole newspaper if possible,
-      // but here we update state to persist it.
-      const updatedDiplomacy = { ...data.diplomacy, [countryName]: info };
-      setData(prev => ({ ...prev, diplomacy: updatedDiplomacy }));
-      setSelectedDiplomacyCountry(info);
-    } catch (error) {
-      console.error("Failed to fetch country info", error);
-      alert(`Failed to retrieve intelligence: ${error instanceof Error ? error.message : String(error)}`);
-    } finally {
-      setDiplomacyLoading(false);
-    }
-  };
-
-  const handleDiplomaticAction = (actionText: string) => {
-    setPrefilledAction(actionText);
-    setIsDiplomacyOpen(false);
-  };
+  const [isConsulting, setIsConsulting] = useState(false);
+  const [advisorOpinions, setAdvisorOpinions] = useState<AdvisorOpinion[]>([]);
+  const [prefilledAction, setPrefilledAction] = useState<string>('');
 
   // Wrapper handlers to pass state up to App
   const handleManualSave = () => {
@@ -178,18 +137,10 @@ export const GameSession: React.FC<Props> = ({
           </div>
         </div>
 
-        {/* Diplomacy Toggle */}
-        <button
-          onClick={() => setIsDiplomacyOpen(!isDiplomacyOpen)}
-          className="absolute right-2 top-2 z-50 bg-stone-700 hover:bg-stone-600 text-stone-200 p-2 rounded shadow border border-stone-500 transition-colors"
-          title="Diplomacy Map"
-        >
-          <span className="text-xl">🌍</span>
-        </button>
       </div>
 
       {/* Main Content */}
-      <main className={`w-full max-w-6xl px-4 py-8 flex-grow transition-all duration-300 ${isDiplomacyOpen ? 'mr-96 opacity-50 pointer-events-none md:opacity-100 md:pointer-events-auto' : ''}`}>
+      <main className="w-full max-w-6xl px-4 py-8 flex-grow transition-all duration-300">
         <Newspaper data={data} />
       </main>
 
@@ -218,15 +169,6 @@ export const GameSession: React.FC<Props> = ({
         history={history}
       />
 
-      <DiplomacySidebar
-        isOpen={isDiplomacyOpen}
-        onClose={() => setIsDiplomacyOpen(false)}
-        knownCountries={data.diplomacy || {}}
-        onSelectCountry={handleDiplomacySelectCountry}
-        selectedCountryData={selectedDiplomacyCountry}
-        isLoading={diplomacyLoading}
-        onActionSelect={handleDiplomaticAction}
-      />
     </div>
   );
 };

@@ -39,33 +39,25 @@ export interface AdvisorOpinion {
   advice: string;
 }
 
-export interface ForeignCountry {
-  name: string;
-  leaderName: string;
-  governmentType: string;
-  stance: 'Ally' | 'Friendly' | 'Neutral' | 'Strained' | 'Hostile' | 'War';
-  description: string; // Brief intel summary
-}
 
 export interface NewspaperData {
   issueDate: string;
   issueNumber: number;
   newspaperName: string;
   country: Country;
-  
+
   // Persistent Memory
   characters: Character[];
-  
-  // Diplomacy Memory (New)
-  diplomacy: Record<string, ForeignCountry>;
-  
+
+  // State Data
+
   // Player choices
   recommendedActions: RecommendedAction[];
 
   // Page 1 Content
   mainStory: NewspaperStory & { visualPrompt: string };
   editorial: NewspaperStory;
-  
+
   // Page 2 Content
   worldNews: NewspaperStory[];
   localNews: NewspaperStory[];
@@ -79,7 +71,7 @@ export interface NewspaperData {
   };
 
   imageUrl?: string; // Base64 image data for main story
-  
+
   stats: GameStats;
   gameOver: boolean;
   gameOverReason?: string;
