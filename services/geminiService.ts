@@ -1,7 +1,29 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { NewspaperData, TurnHistory, GameStats, Country, Character, RecommendedAction, AdvisorOpinion } from "../types";
 
+// --- Constants & Config ---
 const apiKey = process.env.API_KEY;
+const openRouterKey = process.env.OPENROUTER_API_KEY;
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+const TEXT_MODEL_NAME = "gemini-2.0-flash";
+const IMAGE_MODEL_NAME = "gemini-2.0-flash";
+
+// Try these models in order if Gemini fails
+const BACKUP_MODELS = [
+  "google/gemini-2.0-flash-exp:free",
+  "z-ai/glm-5",
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "qwen/qwen-2.5-72b-instruct:free",
+  "openrouter/auto:free"
+];
+
+// Rate limiting state
+const MAX_REQUESTS_PER_MINUTE = 15;
+const WINDOW_SIZE_MS = 60000;
+let requestTimestamps: number[] = [];
+
+// --- Helper Functions ---
 
 const getAIClient = () => {
   if (!apiKey) {
@@ -10,18 +32,41 @@ const getAIClient = () => {
   return new GoogleGenAI({ apiKey });
 };
 
-const TEXT_MODEL_NAME = "gemini-2.0-flash";
-const IMAGE_MODEL_NAME = "gemini-2.0-flash";
+/**
+ * Strips markdown code blocks and any leading/trailing whitespace from AI responses.
+ */
+const cleanJSON = (text: string): string => {
+  if (!text) return "";
+  // Try to extract content between ```json and ``` or just ``` and ```
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (match && match[1]) {
+    return match[1].trim();
+  }
+  return text.trim();
+};
 
-const openRouterKey = process.env.OPENROUTER_API_KEY;
-const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-// Try these models in order if Gemini fails
-const BACKUP_MODELS = [
-  "google/gemini-2.0-flash-exp:free",
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "qwen/qwen-2.5-72b-instruct:free",
-  "openrouter/auto:free"
-];
+const getResponseText = (response: any): string => {
+  if (typeof response.text === 'function') return response.text();
+  if (typeof response.text === 'string') return response.text;
+  if (response.candidates?.[0]?.content?.parts?.[0]?.text) return response.candidates[0].content.parts[0].text;
+  return "";
+};
+
+/**
+ * Checks if we are within the rate limit (15 requests per minute).
+ * Throws an error if the limit is exceeded.
+ */
+const checkRateLimit = () => {
+  const now = Date.now();
+  requestTimestamps = requestTimestamps.filter(ts => now - ts < WINDOW_SIZE_MS);
+
+  if (requestTimestamps.length >= MAX_REQUESTS_PER_MINUTE) {
+    const oldestTs = requestTimestamps[0];
+    const waitTimeSeconds = Math.ceil((WINDOW_SIZE_MS - (now - oldestTs)) / 1000);
+    throw new Error(`The newsroom is overwhelmed! Please wait ${waitTimeSeconds} seconds for the printers to cool down (Free Tier Limit).`);
+  }
+  requestTimestamps.push(now);
+};
 
 /**
  * Enhanced AI caller that tries Gemini first, then falls back to OpenRouter.
@@ -31,7 +76,7 @@ const callAI = async (
   systemInstruction: string,
   schema: any,
   onProgress?: (modelName: string) => void
-): Promise<string> => {
+): Promise<{ text: string, model: string }> => {
   // 1. Try Gemini
   try {
     checkRateLimit();
@@ -57,7 +102,7 @@ const callAI = async (
 
     // VALIDATION: Ensure Gemini actually gave us some JSON content
     if (text && text.includes("headline")) {
-      return text;
+      return { text: cleanJSON(text), model: "Gemini 2.0" };
     }
     console.warn("Gemini returned empty or invalid content, trying OpenRouter...");
   } catch (error: any) {
@@ -113,15 +158,16 @@ const callAI = async (
         throw new Error(result.error?.message || `HTTP ${response.status}`);
       }
 
-      const content = result.choices?.[0]?.message?.content;
+      const rawContent = result.choices?.[0]?.message?.content || "";
+      const content = cleanJSON(rawContent);
 
       // VALIDATION: Ensure the backup model actually gave us a headline
       if (content && content.includes("headline")) {
-        return content;
+        return { text: content, model: friendlyName };
       }
 
-      console.warn(`Model ${model} returned empty/invalid JSON, trying next...`);
-      throw new Error("Invalid/Empty JSON content from model");
+      console.warn(`Model ${model} failed validation. Raw content sample:`, rawContent.substring(0, 100));
+      throw new Error(`Model ${friendlyName} returned invalid content (No headline found)`);
 
     } catch (e: any) {
       console.warn(`OpenRouter model ${model} failed:`, e.name === 'AbortError' ? "Timeout" : e.message);
@@ -131,27 +177,6 @@ const callAI = async (
   }
 
   throw new Error(`AI Service Unavailable: ${lastError?.message || "All models failed"}`);
-};
-
-// Rate limiting state
-const MAX_REQUESTS_PER_MINUTE = 15;
-const WINDOW_SIZE_MS = 60000;
-let requestTimestamps: number[] = [];
-
-/**
- * Checks if we are within the rate limit (15 requests per minute).
- * Throws an error if the limit is exceeded.
- */
-const checkRateLimit = () => {
-  const now = Date.now();
-  requestTimestamps = requestTimestamps.filter(ts => now - ts < WINDOW_SIZE_MS);
-
-  if (requestTimestamps.length >= MAX_REQUESTS_PER_MINUTE) {
-    const oldestTs = requestTimestamps[0];
-    const waitTimeSeconds = Math.ceil((WINDOW_SIZE_MS - (now - oldestTs)) / 1000);
-    throw new Error(`The newsroom is overwhelmed! Please wait ${waitTimeSeconds} seconds for the printers to cool down (Free Tier Limit).`);
-  }
-  requestTimestamps.push(now);
 };
 
 // --- Schemas ---
@@ -260,14 +285,7 @@ const NEWSPAPER_SCHEMA = {
   required: ["issueDate", "mainStory", "editorial", "worldNews", "localNews", "businessNews", "marketData", "stats", "gameOver", "characters", "recommendedActions"]
 };
 
-// --- Helpers ---
-
-const getResponseText = (response: any): string => {
-  if (typeof response.text === 'function') return response.text();
-  if (typeof response.text === 'string') return response.text;
-  if (response.candidates?.[0]?.content?.parts?.[0]?.text) return response.candidates[0].content.parts[0].text;
-  return "";
-};
+// --- Core Shared Logic ---
 
 const generateNewspaperImage = async (visualPrompt: string): Promise<string | undefined> => {
   try {
@@ -293,7 +311,7 @@ const generateNewspaperImage = async (visualPrompt: string): Promise<string | un
 /**
  * Ensures the newspaper data is valid and has all required fields to prevent UI crashes.
  */
-const sanitizeNewspaperData = (data: any, country: Country): NewspaperData => {
+const sanitizeNewspaperData = (data: any, country: Country, model?: string): NewspaperData => {
   const defaultStory = {
     headline: "Extra! Extra! News Room Silenced!",
     subhead: "Technical difficulties in the capital",
@@ -342,7 +360,8 @@ const sanitizeNewspaperData = (data: any, country: Country): NewspaperData => {
       approval: Number(data?.stats?.approval) || defaultStats.approval
     },
     gameOver: !!data?.gameOver,
-    gameOverReason: data?.gameOverReason || ""
+    gameOverReason: data?.gameOverReason || "",
+    aiModel: model || data?.aiModel || "Unknown"
   };
 };
 
@@ -363,7 +382,6 @@ export const initializeGame = async (
   onProgress?: (status: string, progress: number) => void
 ): Promise<NewspaperData> => {
   checkRateLimit();
-  const ai = getAIClient();
   const context = getCountryContext(country);
 
   try {
@@ -371,13 +389,13 @@ export const initializeGame = async (
     const promptNewspaper = `Initialize a political simulation for: ${context}. LEADER NAME: ${leaderName || "Generate a fitting name"}. Generate staff, 4+ world stories, and 3 recommended actions.`;
 
     const systemInstruction = "You are the Editor-in-Chief. Write detailed, immersive, journalistic content. NO PLACEHOLDERS.";
-    const newspaperText = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
+    const { text: newspaperText, model: usedModel } = await callAI(promptNewspaper, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
       if (onProgress) onProgress(`Drafting Front Page (${model})...`, 10);
     });
     if (!newspaperText) throw new Error("No response text from AI.");
 
     const rawData = JSON.parse(newspaperText);
-    const data = sanitizeNewspaperData(rawData, country);
+    const data = sanitizeNewspaperData(rawData, country, usedModel);
     data.country = country;
 
     if (data.mainStory?.visualPrompt) {
@@ -401,7 +419,6 @@ export const processTurn = async (
   currentCharacters: Character[]
 ): Promise<NewspaperData> => {
   checkRateLimit();
-  const ai = getAIClient();
   const context = getCountryContext(country);
   const characterList = currentCharacters.map(c => `"${c.name}" (${c.role})`).join(", ");
 
@@ -409,11 +426,11 @@ export const processTurn = async (
 
   try {
     const systemInstruction = "Maintain character continuity. global variety. NO PLACEHOLDERS.";
-    const text = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
+    const { text, model: usedModel } = await callAI(prompt, systemInstruction, NEWSPAPER_SCHEMA, (model) => {
       console.log(`Processing Turn (${model})...`);
     });
     const rawData = JSON.parse(text);
-    const data = sanitizeNewspaperData(rawData, country);
+    const data = sanitizeNewspaperData(rawData, country, usedModel);
     data.country = country;
 
     if (data.mainStory?.visualPrompt) {
@@ -432,12 +449,11 @@ export const getAdvisorOpinion = async (
   history: TurnHistory[]
 ): Promise<AdvisorOpinion[]> => {
   checkRateLimit();
-  const ai = getAIClient();
   const prompt = `Question: "${question}". Cabinet: ${data.characters.map(c => c.name).join(", ")}. Provide strategic advice.`;
 
   try {
     const systemInstruction = "Provide strategic in-character advice.";
-    const text = await callAI(prompt, systemInstruction, advisorResponseSchema);
+    const { text } = await callAI(prompt, systemInstruction, advisorResponseSchema);
     return JSON.parse(text) as AdvisorOpinion[];
   } catch (error) {
     console.error("Advisor failed", error);

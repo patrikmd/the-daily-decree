@@ -75,6 +75,7 @@ export interface NewspaperData {
   stats: GameStats;
   gameOver: boolean;
   gameOverReason?: string;
+  aiModel?: string;
 }
 
 export interface TurnHistory {
